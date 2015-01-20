@@ -1,3 +1,36 @@
+var User = function(options) {
+    this.id = options._id;
+    this.name = options.name;
+    this.email = options.email;
+};
+
+User.prototype.getMyTransactions = function(transactions) {
+    return _.filter(transactions, function(item) {return item.from == this.id && item.status !== 'closed'}.bind(this));
+};
+
+User.prototype.getMyTransactionsSum = function(transactions) {
+    var filtered = _.filter(transactions, function(item) {return item.from == this.id && item.status !== 'closed'}.bind(this));
+    return _.reduce(_.pluck(filtered, 'amount'), function(memo, num){ return +memo + +num; }, 0);
+};
+
+User.prototype.getOurTransactions = function(transactions) {
+    return _.filter(transactions, function(item) {return item.to == this.id && item.status !== 'closed'}.bind(this));
+};
+
+User.prototype.getOurTransactionsSum = function(transactions) {
+    var filtered = _.filter(transactions, function(item) {return item.to == this.id && item.status !== 'closed'}.bind(this));
+    return _.reduce(_.pluck(filtered, 'amount'), function(memo, num){ return +memo + +num; }, 0);
+};
+
+User.prototype.getBadges = function (transactions) {
+    var debtorsCount = _.filter(this.getMyTransactions(transactions), function(item){return ['paid', 'declined', 'confirmed'].indexOf(item.status) != -1}),
+        creditorsCount = _.filter(this.getOurTransactions(transactions), function(item){return ['open', 'accepted', 'notConfirmed'].indexOf(item.status) != -1});
+    return {
+        debtors: debtorsCount.length,
+        creditors: creditorsCount.length
+    }
+};
+
 var Application = function() {
     this.$container = $('#wrap');
     this.templates = {
@@ -39,10 +72,12 @@ var Application = function() {
         'notConfirmed': 'не подтверждена, повторите',
         'closed': 'закрыта'
     };
+    this.badges = {
+        debtors: 0,
+        creditors: 0
+    };
     this.currentPage = null;
     this.timer = null;
-
-    if (this.me) this.updateTransactionsList();
 };
 
 Application.prototype.init = function (callback) {
@@ -51,6 +86,7 @@ Application.prototype.init = function (callback) {
             if (users.hasOwnProperty(i))
                 this.users[users[i].email] = new User(users[i]);
 
+        if (this.me) this.updateTransactionsList();
         (typeof callback == 'function') && callback();
     }.bind(this));
 
@@ -61,10 +97,12 @@ Application.prototype.init = function (callback) {
             e.preventDefault();
             var email = $(this).find('[type=email]').val();
             if (_this.checkUser(email)) {
-                _this.me = _this.users[email];
+                _this.me = email;
+//                _this.me = _this.users[email];
                 _this.storage.set('me', _this.me);
-                _this.updateTransactionsList();
-                _this.showPage('users');
+                _this.updateTransactionsList(function() {
+                    _this.showPage('users');
+                });
             }
             else
                 alert('Пользователь не найден');
@@ -96,7 +134,7 @@ Application.prototype.init = function (callback) {
                 return;
             }
             _this.showPage('addTransaction', {
-                from: _this.me,
+                from: _this.getMe(),
                 to: _this.getUserById($(e.currentTarget).attr('data-id'))
             });
         })
@@ -111,10 +149,7 @@ Application.prototype.init = function (callback) {
                 };
             _this.call(data, 'addTransaction', function(result) {
                 var user = _this.getUserById(data.to);
-                if (result._id)
-                    alert('Записан долг в размере '+data.amount+' руб. участнику '+user.name);
-                else
-                    alert('Кажется, что-то пошло не так... Повторите позже.');
+                alert('Записан долг в размере '+data.amount+' руб. участнику '+user.name);
                 _this.showPage('users');
             });
         })
@@ -134,13 +169,17 @@ Application.prototype.init = function (callback) {
         }.bind(this));
 };
 
+Application.prototype.getMe = function() {
+    return this.getUserByEmail(this.me);
+};
+
 Application.prototype.showPage = function(page, data) {
     this.currentPage = page;
     data = data || {};
     switch (page) {
         case 'login':
             data = {
-                me: this.me
+                me: this.getMe()
             };
             break;
         case 'users':
@@ -148,8 +187,8 @@ Application.prototype.showPage = function(page, data) {
             break;
         case 'debtors':
             data = {
-                items: _.filter(this.transactionsList, function(item) {return item.from == this.me.id}.bind(this)),
-                me: this.me,
+                items: _.filter(this.transactionsList, function(item) {return item.from == this.getMe().id}.bind(this)),
+                me: this.getMe(),
                 getUserById: this.getUserById.bind(this),
                 states: this.debtorsStates,
                 users: this.users
@@ -157,8 +196,8 @@ Application.prototype.showPage = function(page, data) {
             break;
         case 'creditors':
             data = {
-                items: _.filter(this.transactionsList, function(item) {return item.to == this.me.id}.bind(this)),
-                me: this.me,
+                items: _.filter(this.transactionsList, function(item) {return item.to == this.getMe().id}.bind(this)),
+                me: this.getMe(),
                 getUserById: this.getUserById.bind(this),
                 states: this.creditorsStates,
                 users: this.users
@@ -166,15 +205,9 @@ Application.prototype.showPage = function(page, data) {
             break;
         case 'profile':
             data = {
-                me: this.me,
-                my: (function(){
-                    var transactions = _.filter(this.transactionsList, function(item) {return item.from == this.me.id && item.status !== 'closed'}.bind(this));
-                    return _.reduce(_.pluck(transactions, 'amount'), function(memo, num){ return +memo + +num; }, 0);
-                }.bind(this))(),
-                our: (function(){
-                    var transactions = _.filter(this.transactionsList, function(item) {return item.to == this.me.id && item.status !== 'closed'}.bind(this));
-                    return _.reduce(_.pluck(transactions, 'amount'), function(memo, num){ return +memo + +num; }, 0);
-                }.bind(this))()
+                me: this.getMe(),
+                my: this.getMe().getMyTransactionsSum(this.transactionsList),
+                our: this.getMe().getOurTransactionsSum(this.transactionsList)
             };
             break;
     }
@@ -211,11 +244,18 @@ Application.prototype.getTransactionsList = function(userId, callback) {
 Application.prototype.updateTransactionsList = function (callback) {
     clearTimeout(this.timer);
     if (!this.me) return false;
-    this.getTransactionsList(this.me.id, function(data) {
+    this.getTransactionsList(this.getMe().id, function(data) {
         this.transactionsList = data;
+        this.badges = this.getMe().getBadges(this.transactionsList);
+        this.renderBadges(this.badges);
         this.timer = setTimeout(this.updateTransactionsList.bind(this), 3000);
         callback && callback(data);
     }.bind(this));
+};
+
+Application.prototype.renderBadges = function() {
+    $('#badge-debtors').html(this.badges.debtors && this.badges.debtors || '');
+    $('#badge-creditors').html(this.badges.creditors && this.badges.creditors || '');
 };
 
 Application.prototype.call = function (data, method, callback) {
@@ -228,12 +268,6 @@ Application.prototype.call = function (data, method, callback) {
     $.post('http://tls.vm-dev24:8082', JSON.stringify(requestData), function(data){
         callback(data.result);
     }.bind(this));
-};
-
-var User = function(options) {
-    this.id = options._id;
-    this.name = options.name;
-    this.email = options.email;
 };
 
 var ApplicationStorage = function () {};
