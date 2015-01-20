@@ -42,7 +42,7 @@ var Application = function() {
         'addTransaction': $('#addTransaction-template')
     };
     this.storage = new ApplicationStorage();
-    this.me = this.storage.get('me') || null;
+    this.me = this.storage.get('email') || null;
     this.users = {};
     this.transactionsList = [];
     this.states = {
@@ -98,8 +98,7 @@ Application.prototype.init = function (callback) {
             var email = $(this).find('[type=email]').val();
             if (_this.checkUser(email)) {
                 _this.me = email;
-//                _this.me = _this.users[email];
-                _this.storage.set('me', _this.me);
+                _this.storage.set('email', _this.me);
                 _this.updateTransactionsList(function() {
                     _this.showPage('users');
                 });
@@ -123,7 +122,7 @@ Application.prototype.init = function (callback) {
         .delegate('#logout-btn', 'click', function(e){
             e.preventDefault();
             _this.me = null;
-            _this.storage.remove('me');
+            _this.storage.remove('email');
             _this.showPage('login');
         })
         // события выбора участника для передачи средств
